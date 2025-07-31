@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>سیستم تشخیص پلاک</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans">
+  <div class="max-w-4xl mx-auto py-10 px-6">
+    <h1 class="text-3xl font-bold text-center text-gray-800 mb-10">🚗 سیستم تشخیص پلاک خودرو</h1>
+
+    <div class="mb-6 flex justify-center space-x-2 rtl:space-x-reverse">
+      <button class="tab-btn px-4 py-2 rounded bg-blue-600 text-white" onclick="showTab('image')">تصویر</button>
+      <button class="tab-btn px-4 py-2 rounded bg-gray-300 text-gray-800" onclick="showTab('video')">ویدیو</button>
+      <button class="tab-btn px-4 py-2 rounded bg-gray-300 text-gray-800" onclick="showTab('live')">دوربین زنده</button>
+    </div>
+
+    <!-- Image Tab -->
+    <div id="tab-image" class="tab-content">
+      <div class="bg-white p-6 rounded shadow">
+        <label class="block font-semibold text-gray-700 mb-2">آپلود تصویر:</label>
+        <input id="imageInput" type="file" accept="image/*" class="mb-4">
+        <button onclick="uploadImage()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">ارسال</button>
+        <div class="mt-4 flex gap-4">
+          <div class="w-1/2">
+            <h3 class="font-semibold mb-2">نتایج:</h3>
+            <pre id="imageResult" class="bg-gray-100 p-4 rounded text-sm whitespace-pre-wrap"></pre>
+          </div>
+          <div class="w-1/2">
+            <h3 class="font-semibold mb-2">تصویر پردازش شده:</h3>
+            <img id="imageOutput" class="w-full rounded shadow hidden" alt="خروجی تصویر">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Video Tab -->
+    <div id="tab-video" class="tab-content hidden">
+      <div class="bg-white p-6 rounded shadow">
+        <label class="block font-semibold text-gray-700 mb-2">آپلود ویدیو:</label>
+        <input id="videoInput" type="file" accept="video/*" class="mb-4">
+        <button onclick="uploadVideo()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">ارسال</button>
+        <div class="mt-4">
+          <video id="videoOutput" class="w-full rounded shadow hidden" controls></video>
+          <div id="videoLoading" class="hidden text-center py-4">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <p class="mt-2 text-gray-600">در حال پردازش ویدیو...</p>
+          </div>
+          <div class="mt-4">
+            <h3 class="font-semibold mb-2">نتایج تشخیص پلاک:</h3>
+            <pre id="videoResult" class="bg-gray-100 p-4 rounded text-sm whitespace-pre-wrap"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Tab -->
+    <div id="tab-live" class="tab-content hidden">
+      <div class="bg-white p-6 rounded shadow">
+        <label class="block font-semibold text-gray-700 mb-2">دوربین زنده:</label>
+        <video id="liveVideo" width="100%" class="rounded shadow" autoplay></video>
+        <button onclick="captureAndSend()" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">تشخیص پلاک</button>
+        <div class="mt-4 flex gap-4">
+          <div class="w-1/2">
+            <h3 class="font-semibold mb-2">نتایج:</h3>
+            <pre id="liveResult" class="bg-gray-100 p-4 rounded text-sm whitespace-pre-wrap"></pre>
+          </div>
+          <div class="w-1/2">
+            <h3 class="font-semibold mb-2">تصویر پردازش شده:</h3>
+            <img id="liveOutput" class="w-full rounded shadow hidden" alt="خروجی زنده">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function showTab(tab) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('bg-blue-600', 'text-white');
+        btn.classList.add('bg-gray-300', 'text-gray-800');
+      });
+
+      document.getElementById(`tab-${tab}`).classList.remove('hidden');
+      event.target.classList.add('bg-blue-600', 'text-white');
+    }
+
+    async function uploadImage() {
+      const file = document.getElementById("imageInput").files[0];
+      if (!file) return alert("لطفاً یک تصویر انتخاب کنید.");
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const res = await fetch("/recognize_image", { method: "POST", body: formData });
+        if (!res.ok) throw new Error(await res.text());
+        
+        const json = await res.json();
+        document.getElementById("imageResult").textContent = JSON.stringify(json.results, null, 2);
+        
+        const imgOutput = document.getElementById("imageOutput");
+        imgOutput.src = "data:image/jpeg;base64," + json.image;
+        imgOutput.classList.remove("hidden");
+      } catch (err) {
+        alert("خطا در پردازش تصویر: " + err.message);
+      }
+    }
+
+   async function uploadVideo() {
+    const file = document.getElementById("videoInput").files[0];
+    if (!file) {
+        alert("لطفاً یک ویدیو انتخاب کنید.");
+        return;
+    }
+
+    const videoOutput = document.getElementById("videoOutput");
+    const loadingIndicator = document.getElementById("videoLoading");
+    const videoResult = document.getElementById("videoResult");
+    
+    // Reset UI
+    videoOutput.classList.add("hidden");
+    loadingIndicator.classList.remove("hidden");
+    videoResult.textContent = "در حال پردازش...";
+    
+    console.log("Starting video upload...");
+    
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+        console.log("Sending request to server...");
+        const startTime = performance.now();
+        
+        const res = await fetch("/recognize_video", {
+            method: "POST",
+            body: formData,
+            headers: {
+                'Accept': 'application/json'
+            }
+        });
+        
+        const endTime = performance.now();
+        console.log(`Request completed in ${(endTime - startTime).toFixed(2)}ms`);
+        
+        if (!res.ok) {
+            const errorText = await res.text();
+            console.error("Server responded with error:", errorText);
+            throw new Error(`خطای سرور: ${res.status} - ${errorText}`);
+        }
+        
+        const data = await res.json();
+        console.log("Response data:", data);
+        
+        if (data.status === 'error') {
+            console.error("Processing error:", data);
+            throw new Error(data.error || data.message);
+        }
+
+        // Display results
+        videoResult.textContent = JSON.stringify({
+            plates: data.results,
+            metadata: data.metadata
+        }, null, 2);
+        
+        // Display video
+        if (data.video) {
+            videoOutput.src = "data:video/mp4;base64," + data.video;
+            videoOutput.classList.remove("hidden");
+            console.log("Video loaded successfully");
+        } else {
+            console.warn("No video data in response");
+        }
+        
+    } catch (err) {
+        console.error("Error during processing:", err);
+        videoResult.textContent = `خطا: ${err.message}`;
+        alert(`خطا در پردازش ویدیو:\n${err.message}`);
+    } finally {
+        loadingIndicator.classList.add("hidden");
+        console.log("Processing completed");
+    }
+}
+    async function captureAndSend() {
+      const video = document.getElementById("liveVideo");
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0);
+
+      canvas.toBlob(async (blob) => {
+        const formData = new FormData();
+        formData.append("file", blob, "capture.jpg");
+
+        try {
+          const res = await fetch("/recognize_image", { method: "POST", body: formData });
+          if (!res.ok) throw new Error(await res.text());
+          
+          const json = await res.json();
+          document.getElementById("liveResult").textContent = JSON.stringify(json.results, null, 2);
+          
+          const imgOutput = document.getElementById("liveOutput");
+          imgOutput.src = "data:image/jpeg;base64," + json.image;
+          imgOutput.classList.remove("hidden");
+        } catch (err) {
+          alert("خطا در پردازش تصویر: " + err.message);
+        }
+      }, "image/jpeg");
+    }
+
+    // Initialize camera
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        document.getElementById("liveVideo").srcObject = stream;
+      })
+      .catch(err => {
+        console.error("Camera access error:", err);
+        alert("خطا در دسترسی به دوربین: " + err.message);
+      });
+  </script>
+</body>
+</html>

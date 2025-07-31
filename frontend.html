@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+  <meta charset="UTF-8">
+  <title>تشخیص پلاک</title>
+  <style>
+    body { font-family: Tahoma; direction: rtl; margin: 20px; }
+    .section { margin-bottom: 30px; }
+    label { display: block; margin-bottom: 10px; font-weight: bold; }
+    input[type="file"], button { margin-top: 10px; }
+    img, video { max-width: 100%; margin-top: 10px; border: 1px solid #ccc; }
+    .result { margin-top: 20px; padding: 10px; background: #f0f0f0; }
+  </style>
+</head>
+<body>
+
+  <h1>سیستم تشخیص پلاک</h1>
+
+  <!-- Upload image -->
+  <div class="section">
+    <label for="imageInput">آپلود تصویر</label>
+    <input type="file" id="imageInput" accept="image/*">
+    <button onclick="uploadImage()">ارسال تصویر</button>
+    <div class="result" id="imageResult"></div>
+  </div>
+
+  <!-- Upload video -->
+  <div class="section">
+    <label for="videoInput">آپلود ویدیو</label>
+    <input type="file" id="videoInput" accept="video/*">
+    <button onclick="uploadVideo()">ارسال ویدیو</button>
+    <video id="videoPreview" controls></video>
+  </div>
+
+  <!-- Live camera -->
+  <div class="section">
+    <label>تصویر زنده</label>
+    <video id="liveVideo" width="640" height="480" autoplay></video>
+    <button onclick="captureAndSend()">تشخیص تصویر زنده</button>
+    <div class="result" id="liveResult"></div>
+  </div>
+
+  <script>
+    async function uploadImage() {
+      const fileInput = document.getElementById("imageInput");
+      if (!fileInput.files.length) return alert("تصویر انتخاب نشده!");
+
+      const formData = new FormData();
+      formData.append("file", fileInput.files[0]);
+
+      const res = await fetch("/recognize_image", {
+        method: "POST",
+        body: formData
+      });
+
+      const json = await res.json();
+      document.getElementById("imageResult").innerText = JSON.stringify(json.results, null, 2);
+    }
+
+    async function uploadVideo() {
+      const fileInput = document.getElementById("videoInput");
+      if (!fileInput.files.length) return alert("ویدیو انتخاب نشده!");
+
+      const formData = new FormData();
+      formData.append("file", fileInput.files[0]);
+
+      const res = await fetch("/recognize_video", {
+        method: "POST",
+        body: formData
+      });
+
+      if (res.ok) {
+        const blob = await res.blob();
+        const videoUrl = URL.createObjectURL(blob);
+        const video = document.getElementById("videoPreview");
+        video.src = videoUrl;
+        video.load();
+      } else {
+        alert("خطا در پردازش ویدیو");
+      }
+    }
+
+    async function captureAndSend() {
+      const video = document.getElementById("liveVideo");
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0);
+
+      canvas.toBlob(async (blob) => {
+        const formData = new FormData();
+        formData.append("file", blob, "capture.jpg");
+
+        const res = await fetch("/recognize_image", {
+          method: "POST",
+          body: formData
+        });
+
+        const json = await res.json();
+        document.getElementById("liveResult").innerText = JSON.stringify(json.results, null, 2);
+      }, "image/jpeg");
+    }
+
+    // فعال‌سازی دوربین
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        document.getElementById("liveVideo").srcObject = stream;
+      })
+      .catch(err => {
+        console.error("عدم دسترسی به دوربین", err);
+      });
+  </script>
+
+</body>
+</html>
