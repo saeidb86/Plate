@@ -81,10 +81,10 @@ async def recognize_video(file: UploadFile = File(...)):
             video_base64 = base64.b64encode(video_bytes).decode('utf-8')
             
             # Clean up
-            try:
-                os.unlink(tmp_path)
-            except Exception as e:
-                print(f"Warning: Could not delete temp file {tmp_path}: {e}")
+            # try:
+            #     os.unlink(tmp_path)
+            # except Exception as e:
+            #     print(f"Warning: Could not delete temp file {tmp_path}: {e}")
             
             return JSONResponse(content={
                 'status': 'success',
@@ -109,4 +109,4 @@ async def serve_demo():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8086)
+    uvicorn.run(app, host="127.0.0.1", port=8089)

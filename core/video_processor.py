@@ -25,7 +25,7 @@ class VideoProcessor:
         with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_output:
             temp_path = temp_output.name
 
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fourcc = cv2.VideoWriter_fourcc(*'H264')
         out = cv2.VideoWriter(temp_path, fourcc, fps, (width, height))
 
         frame_count = 0
@@ -69,10 +69,10 @@ class VideoProcessor:
             video_bytes = f.read()
         
         # Clean up
-        try:
-            os.unlink(temp_path)
-        except Exception as e:
-            print(f"Warning: Could not delete temp file {temp_path}: {e}")
+        # try:
+        #     os.unlink(temp_path)
+        # except Exception as e:
+        #     print(f"Warning: Could not delete temp file {temp_path}: {e}")
 
         output_buffer = BytesIO()
         output_buffer.write(video_bytes)
