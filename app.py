@@ -60,20 +60,44 @@ async def recognize_video(file: UploadFile = File(...)):
             tmp_path = tmp_file.name
         
         try:
+            # Get video metadata
+            cap = cv2.VideoCapture(tmp_path)
+            if not cap.isOpened():
+                raise ValueError("Could not open video file")
+            
+            metadata = {
+                'fps': cap.get(cv2.CAP_PROP_FPS),
+                'frame_count': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
+                'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            }
+            cap.release()
+
             # Process video
-            output_buffer = video_processor.process_video(tmp_path)
+            output_buffer, results = video_processor.process_video(tmp_path)
+            
+            # Convert video to base64
+            video_bytes = output_buffer.getvalue()
+            video_base64 = base64.b64encode(video_bytes).decode('utf-8')
             
             # Clean up
-            os.unlink(tmp_path)
+            try:
+                os.unlink(tmp_path)
+            except Exception as e:
+                print(f"Warning: Could not delete temp file {tmp_path}: {e}")
             
-            return StreamingResponse(
-                output_buffer,
-                media_type="video/mp4",
-                headers={"Content-Disposition": "inline; filename=processed.mp4"}
-            )
+            return JSONResponse(content={
+                'status': 'success',
+                'results': results,
+                'metadata': metadata,
+                'video': video_base64
+            })
         except Exception as e:
             if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+                try:
+                    os.unlink(tmp_path)
+                except Exception as ex:
+                    print(f"Warning: Could not delete temp file {tmp_path}: {ex}")
             raise e
             
     except Exception as e:
@@ -83,7 +107,6 @@ async def recognize_video(file: UploadFile = File(...)):
 async def serve_demo():
     return FileResponse("demo.html")
 
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8084)
+    uvicorn.run(app, host="127.0.0.1", port=8086)

@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from io import BytesIO
 import tempfile
-import os  # اضافه کردن ماژول os
+import os
 
 class VideoProcessor:
     def __init__(self, detector, recognizer):
@@ -29,6 +29,8 @@ class VideoProcessor:
         out = cv2.VideoWriter(temp_path, fourcc, fps, (width, height))
 
         frame_count = 0
+        results = []  # List to store plate detection results
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -49,6 +51,14 @@ class VideoProcessor:
                 cv2.putText(frame, text, (x1, y1 - 10), 
                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
+                # Store plate info
+                results.append({
+                    'text': text,
+                    'bbox': [x1, y1, x2, y2],
+                    'confidence': float(plate['confidence']),
+                    'frame_number': frame_count
+                })
+
             out.write(frame)
 
         cap.release()
@@ -59,10 +69,13 @@ class VideoProcessor:
             video_bytes = f.read()
         
         # Clean up
-        os.unlink(temp_path)
+        try:
+            os.unlink(temp_path)
+        except Exception as e:
+            print(f"Warning: Could not delete temp file {temp_path}: {e}")
 
         output_buffer = BytesIO()
         output_buffer.write(video_bytes)
         output_buffer.seek(0)
         
-        return output_buffer
+        return output_buffer, results

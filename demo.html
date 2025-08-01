@@ -39,7 +39,7 @@
       <div class="bg-white p-6 rounded shadow">
         <label class="block font-semibold text-gray-700 mb-2">آپلود ویدیو:</label>
         <input id="videoInput" type="file" accept="video/*" class="mb-4">
-        <button onclick="uploadVideo()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">ارسال</button>
+         <button onclick="uploadVideo()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">ارسال</button>
         <div class="mt-4">
           <video id="videoOutput" class="w-full rounded shadow hidden" controls></video>
           <div id="videoLoading" class="hidden text-center py-4">
@@ -108,7 +108,7 @@
       }
     }
 
-   async function uploadVideo() {
+async function uploadVideo() {
     const file = document.getElementById("videoInput").files[0];
     if (!file) {
         alert("لطفاً یک ویدیو انتخاب کنید.");
