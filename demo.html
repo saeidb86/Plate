@@ -58,12 +58,22 @@
     <div id="tab-live" class="tab-content hidden">
       <div class="bg-white p-6 rounded shadow">
         <label class="block font-semibold text-gray-700 mb-2">دوربین زنده:</label>
-        <video id="liveVideo" width="100%" class="rounded shadow" autoplay></video>
-        <button onclick="captureAndSend()" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">تشخیص پلاک</button>
+        <div class="relative">
+          <video id="liveVideo" width="100%" class="rounded shadow" autoplay></video>
+          <div id="liveLoading" class="hidden absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto"></div>
+          </div>
+        </div>
+        <div class="flex gap-2 mt-4">
+          <button onclick="startCamera()" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">شروع دوربین</button>
+          <button onclick="stopCamera()" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">توقف دوربین</button>
+          <button onclick="captureAndSend()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">تشخیص پلاک</button>
+          <button onclick="toggleContinuousMode()" id="continuousBtn" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">حالت تشخیص خودکار</button>
+        </div>
         <div class="mt-4 flex gap-4">
           <div class="w-1/2">
             <h3 class="font-semibold mb-2">نتایج:</h3>
-            <pre id="liveResult" class="bg-gray-100 p-4 rounded text-sm whitespace-pre-wrap"></pre>
+            <pre id="liveResult" class="bg-gray-100 p-4 rounded text-sm whitespace-pre-wrap max-h-64 overflow-auto"></pre>
           </div>
           <div class="w-1/2">
             <h3 class="font-semibold mb-2">تصویر پردازش شده:</h3>
@@ -75,6 +85,12 @@
   </div>
 
   <script>
+    // Global variables for camera control
+    let cameraStream = null;
+    let continuousMode = false;
+    let continuousInterval = null;
+    const detectionInterval = 2000; // 2 seconds between auto detections
+
     function showTab(tab) {
       document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
       document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -84,6 +100,11 @@
 
       document.getElementById(`tab-${tab}`).classList.remove('hidden');
       event.target.classList.add('bg-blue-600', 'text-white');
+      
+      // Stop camera when switching away from live tab
+      if (tab !== 'live') {
+        stopCamera();
+      }
     }
 
     async function uploadImage() {
@@ -108,116 +129,208 @@
       }
     }
 
-async function uploadVideo() {
-    const file = document.getElementById("videoInput").files[0];
-    if (!file) {
-        alert("لطفاً یک ویدیو انتخاب کنید.");
-        return;
+    async function uploadVideo() {
+      const file = document.getElementById("videoInput").files[0];
+      if (!file) {
+          alert("لطفاً یک ویدیو انتخاب کنید.");
+          return;
+      }
+
+      const videoOutput = document.getElementById("videoOutput");
+      const loadingIndicator = document.getElementById("videoLoading");
+      const videoResult = document.getElementById("videoResult");
+      
+      // Reset UI
+      videoOutput.classList.add("hidden");
+      loadingIndicator.classList.remove("hidden");
+      videoResult.textContent = "در حال پردازش...";
+      
+      console.log("Starting video upload...");
+      
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+          console.log("Sending request to server...");
+          const startTime = performance.now();
+          
+          const res = await fetch("/recognize_video", {
+              method: "POST",
+              body: formData,
+              headers: {
+                  'Accept': 'application/json'
+              }
+          });
+          
+          const endTime = performance.now();
+          console.log(`Request completed in ${(endTime - startTime).toFixed(2)}ms`);
+          
+          if (!res.ok) {
+              const errorText = await res.text();
+              console.error("Server responded with error:", errorText);
+              throw new Error(`خطای سرور: ${res.status} - ${errorText}`);
+          }
+          
+          const data = await res.json();
+          console.log("Response data:", data);
+          
+          if (data.status === 'error') {
+              console.error("Processing error:", data);
+              throw new Error(data.error || data.message);
+          }
+
+          // Display results
+          videoResult.textContent = JSON.stringify({
+              plates: data.results,
+              metadata: data.metadata
+          }, null, 2);
+          
+          // Display video
+          if (data.video) {
+              videoOutput.src = "data:video/mp4;base64," + data.video;
+              videoOutput.classList.remove("hidden");
+              console.log("Video loaded successfully");
+          } else {
+              console.warn("No video data in response");
+          }
+          
+      } catch (err) {
+          console.error("Error during processing:", err);
+          videoResult.textContent = `خطا: ${err.message}`;
+          alert(`خطا در پردازش ویدیو:\n${err.message}`);
+      } finally {
+          loadingIndicator.classList.add("hidden");
+          console.log("Processing completed");
+      }
     }
 
-    const videoOutput = document.getElementById("videoOutput");
-    const loadingIndicator = document.getElementById("videoLoading");
-    const videoResult = document.getElementById("videoResult");
-    
-    // Reset UI
-    videoOutput.classList.add("hidden");
-    loadingIndicator.classList.remove("hidden");
-    videoResult.textContent = "در حال پردازش...";
-    
-    console.log("Starting video upload...");
-    
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-        console.log("Sending request to server...");
-        const startTime = performance.now();
+    async function startCamera() {
+      try {
+        // Stop any existing stream
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(track => track.stop());
+        }
         
-        const res = await fetch("/recognize_video", {
-            method: "POST",
-            body: formData,
-            headers: {
-                'Accept': 'application/json'
-            }
+        // Request camera access
+        cameraStream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'environment' 
+          } 
         });
         
-        const endTime = performance.now();
-        console.log(`Request completed in ${(endTime - startTime).toFixed(2)}ms`);
+        const liveVideo = document.getElementById("liveVideo");
+        liveVideo.srcObject = cameraStream;
         
-        if (!res.ok) {
-            const errorText = await res.text();
-            console.error("Server responded with error:", errorText);
-            throw new Error(`خطای سرور: ${res.status} - ${errorText}`);
-        }
-        
-        const data = await res.json();
-        console.log("Response data:", data);
-        
-        if (data.status === 'error') {
-            console.error("Processing error:", data);
-            throw new Error(data.error || data.message);
-        }
-
-        // Display results
-        videoResult.textContent = JSON.stringify({
-            plates: data.results,
-            metadata: data.metadata
-        }, null, 2);
-        
-        // Display video
-        if (data.video) {
-            videoOutput.src = "data:video/mp4;base64," + data.video;
-            videoOutput.classList.remove("hidden");
-            console.log("Video loaded successfully");
-        } else {
-            console.warn("No video data in response");
-        }
-        
-    } catch (err) {
-        console.error("Error during processing:", err);
-        videoResult.textContent = `خطا: ${err.message}`;
-        alert(`خطا در پردازش ویدیو:\n${err.message}`);
-    } finally {
-        loadingIndicator.classList.add("hidden");
-        console.log("Processing completed");
-    }
-}
-    async function captureAndSend() {
-      const video = document.getElementById("liveVideo");
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.getContext("2d").drawImage(video, 0, 0);
-
-      canvas.toBlob(async (blob) => {
-        const formData = new FormData();
-        formData.append("file", blob, "capture.jpg");
-
-        try {
-          const res = await fetch("/recognize_image", { method: "POST", body: formData });
-          if (!res.ok) throw new Error(await res.text());
-          
-          const json = await res.json();
-          document.getElementById("liveResult").textContent = JSON.stringify(json.results, null, 2);
-          
-          const imgOutput = document.getElementById("liveOutput");
-          imgOutput.src = "data:image/jpeg;base64," + json.image;
-          imgOutput.classList.remove("hidden");
-        } catch (err) {
-          alert("خطا در پردازش تصویر: " + err.message);
-        }
-      }, "image/jpeg");
-    }
-
-    // Initialize camera
-    navigator.mediaDevices.getUserMedia({ video: true })
-      .then(stream => {
-        document.getElementById("liveVideo").srcObject = stream;
-      })
-      .catch(err => {
+        console.log("Camera started successfully");
+      } catch (err) {
         console.error("Camera access error:", err);
         alert("خطا در دسترسی به دوربین: " + err.message);
-      });
+      }
+    }
+
+    function stopCamera() {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+        
+        const liveVideo = document.getElementById("liveVideo");
+        liveVideo.srcObject = null;
+        
+        // Also stop continuous mode if active
+        if (continuousMode) {
+          toggleContinuousMode();
+        }
+        
+        console.log("Camera stopped");
+      }
+    }
+
+    function toggleContinuousMode() {
+      continuousMode = !continuousMode;
+      const btn = document.getElementById("continuousBtn");
+      
+      if (continuousMode) {
+        btn.textContent = "توقف تشخیص خودکار";
+        btn.classList.remove("bg-purple-600");
+        btn.classList.add("bg-red-600");
+        
+        // Start continuous detection
+        continuousInterval = setInterval(captureAndSend, detectionInterval);
+        console.log("Continuous mode started");
+      } else {
+        btn.textContent = "حالت تشخیص خودکار";
+        btn.classList.remove("bg-red-600");
+        btn.classList.add("bg-purple-600");
+        
+        // Stop continuous detection
+        if (continuousInterval) {
+          clearInterval(continuousInterval);
+          continuousInterval = null;
+        }
+        console.log("Continuous mode stopped");
+      }
+    }
+async function captureAndSend() {
+    const liveVideo = document.getElementById("liveVideo");
+    const liveOutput = document.getElementById("liveOutput");
+    const liveResult = document.getElementById("liveResult");
+    const loadingIndicator = document.getElementById("liveLoading");
+    
+    if (!liveVideo.srcObject || !liveVideo.videoWidth) {
+        alert("لطفاً ابتدا دوربین را فعال کنید.");
+        return;
+    }
+    
+    loadingIndicator.classList.remove("hidden");
+    
+    try {
+        const canvas = document.createElement("canvas");
+        canvas.width = liveVideo.videoWidth;
+        canvas.height = liveVideo.videoHeight;
+        canvas.getContext("2d").drawImage(liveVideo, 0, 0, canvas.width, canvas.height);
+        
+        const blob = await new Promise(resolve => {
+            canvas.toBlob(resolve, "image/jpeg", 0.9);
+        });
+        
+        const formData = new FormData();
+        formData.append("file", blob, "camera_capture.jpg");
+        
+        const startTime = performance.now();
+        const res = await fetch("/recognize_camera", { 
+            method: "POST", 
+            body: formData 
+        });
+        
+        if (!res.ok) {
+            throw new Error(await res.text());
+        }
+        
+        const json = await res.json();
+        const endTime = performance.now();
+        console.log(`Detection completed in ${(endTime - startTime).toFixed(2)}ms`);
+        
+        liveResult.textContent = JSON.stringify(json.results, null, 2);
+        
+        if (json.image) {
+            liveOutput.src = "data:image/jpeg;base64," + json.image;
+            liveOutput.classList.remove("hidden");
+        }
+        
+        liveResult.scrollTop = liveResult.scrollHeight;
+        
+    } catch (err) {
+        console.error("Detection error:", err);
+        liveResult.textContent = `خطا در پردازش تصویر: ${err.message}`;
+    } finally {
+        loadingIndicator.classList.add("hidden");
+    }
+}
+   
+    // Initialize tab
+    showTab('image');
   </script>
 </body>
 </html>
