@@ -17,6 +17,17 @@
         .status { padding: 5px; margin: 5px 0; }
         .connected { background-color: #cfc; }
         .disconnected { background-color: #fcc; }
+        .history-item { border-bottom: 1px solid #eee; padding: 5px; }
+        .history-success { background-color: #dfd; }
+        .history-error { background-color: #fdd; }
+        .auto-status { 
+            padding: 10px; 
+            margin: 10px 0; 
+            border-radius: 5px; 
+            text-align: center; 
+        }
+        .auto-active { background-color: #cfc; }
+        .auto-inactive { background-color: #ffc; }
     </style>
 </head>
 <body>
@@ -24,6 +35,7 @@
         <span class="tab-button active" onclick="openTab('imageTab')">تصویر</span>
         <span class="tab-button" onclick="openTab('videoTab')">ویدیو</span>
         <span class="tab-button" onclick="openTab('cameraTab')">دوربین</span>
+        <span class="tab-button" onclick="openTab('historyTab')">تاریخچه</span>
     </div>
 
     <div id="imageTab" class="tab active">
@@ -61,6 +73,9 @@
     <div id="cameraTab" class="tab">
         <h2>دوربین RTSP:</h2>
         <div class="status" id="cameraStatus">وضعیت: دوربین قطع</div>
+        <div class="auto-status auto-active" id="autoStatus">
+            سیستم تشخیص خودکار فعال است (هر 5 ثانیه بررسی می‌کند)
+        </div>
         
         <div class="result-box">
             <img id="cameraFeed" />
@@ -70,7 +85,6 @@
             <button onclick="startCamera()">شروع دوربین</button>
             <button onclick="stopCamera()">توقف دوربین</button>
             <button onclick="captureAndRecognize()">تشخیص پلاک</button>
-            <button onclick="toggleContinuousMode()">حالت تشخیص خودکار</button>
         </div>
         
         <div class="result-box">
@@ -81,6 +95,17 @@
         <div class="result-box">
             <h3>تصویر پردازش شده:</h3>
             <img id="processedCameraImage" class="image-preview" />
+        </div>
+    </div>
+
+    <div id="historyTab" class="tab">
+        <h2>تاریخچه تشخیص پلاک:</h2>
+        <button onclick="loadDetectionHistory()">بارگذاری تاریخچه</button>
+        <button onclick="clearDetectionHistory()">پاک کردن تاریخچه</button>
+        
+        <div class="result-box">
+            <h3>تاریخچه ارسال به API:</h3>
+            <div id="detectionHistory"></div>
         </div>
     </div>
 
@@ -97,6 +122,10 @@
             
             if (tabName !== 'cameraTab') {
                 stopCamera();
+            }
+            
+            if (tabName === 'historyTab') {
+                loadDetectionHistory();
             }
         }
 
@@ -170,23 +199,6 @@
             }
         }
 
-        function toggleContinuousMode() {
-            const button = document.querySelector('button[onclick="toggleContinuousMode()"]');
-            
-            if (autoInterval) {
-                clearInterval(autoInterval);
-                autoInterval = null;
-                button.textContent = 'حالت تشخیص خودکار';
-            } else {
-                button.textContent = 'توقف تشخیص خودکار';
-                autoInterval = setInterval(() => {
-                    if (document.getElementById('cameraTab').classList.contains('active')) {
-                        captureAndRecognize();
-                    }
-                }, 1000); // هر 1 ثانیه یکبار تشخیص
-            }
-        }
-
         function displayResults(data, resultsElementId, imageElementId) {
             const resultsDiv = document.getElementById(resultsElementId);
             const imageElement = document.getElementById(imageElementId);
@@ -201,6 +213,51 @@
                 }
             } else {
                 resultsDiv.innerHTML = `<div>خطا: ${data.detail || 'خطای ناشناخته'}</div>`;
+            }
+        }
+
+        async function loadDetectionHistory() {
+            try {
+                const response = await fetch('/detection_history');
+                const data = await response.json();
+                
+                const historyDiv = document.getElementById('detectionHistory');
+                historyDiv.innerHTML = '';
+                
+                if (data.history && data.history.length > 0) {
+                    data.history.reverse().forEach(item => {
+                        const itemDiv = document.createElement('div');
+                        itemDiv.className = `history-item ${item.sent ? 'history-success' : 'history-error'}`;
+                        
+                        const time = new Date(item.timestamp).toLocaleString('fa-IR');
+                        itemDiv.innerHTML = `
+                            <div><strong>پلاک:</strong> ${item.plate}</div>
+                            <div><strong>زمان:</strong> ${time}</div>
+                            <div><strong>وضعیت:</strong> ${item.sent ? 'ارسال موفق' : 'ارسال ناموفق'}</div>
+                            ${item.error ? `<div><strong>خطا:</strong> ${item.error}</div>` : ''}
+                        `;
+                        
+                        historyDiv.appendChild(itemDiv);
+                    });
+                } else {
+                    historyDiv.innerHTML = '<div>هیچ تاریخچه‌ای موجود نیست</div>';
+                }
+            } catch (err) {
+                console.error("Error loading history:", err);
+                document.getElementById('detectionHistory').innerHTML = '<div>خطا در بارگذاری تاریخچه</div>';
+            }
+        }
+
+        async function clearDetectionHistory() {
+            if (confirm('آیا از پاک کردن تاریخچه اطمینان دارید؟')) {
+                try {
+                    // در اینجا می‌توانید یک API برای پاک کردن تاریخچه اضافه کنید
+                    // فعلاً فقط صفحه را رفرش می‌کند
+                    loadDetectionHistory();
+                } catch (err) {
+                    console.error("Error clearing history:", err);
+                    alert("خطا در پاک کردن تاریخچه");
+                }
             }
         }
 

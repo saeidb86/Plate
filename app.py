@@ -13,6 +13,9 @@ from datetime import datetime
 import uuid
 import asyncio
 import logging
+import requests
+from datetime import datetime, timedelta
+from collections import deque
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,13 +37,18 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 RTSP_URL = "rtsp://admin:Abc123456@192.168.100.104:554/main"
 rtsp_cap = None
 
+# Global variables for plate detection history
+DETECTION_HISTORY = deque(maxlen=1000)  # ذخیره تاریخچه پلاک‌ها
+API_ENDPOINT = "http://127.0.0.1:3000/monitoring"
+LAST_SENT_TIME = {}
+
 def get_rtsp_frame():
     global rtsp_cap
     try:
         if rtsp_cap is None:
             rtsp_cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
             rtsp_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            rtsp_cap.set(cv2.CAP_PROP_FPS, 15)  # محدود کردن نرخ فریم
+            rtsp_cap.set(cv2.CAP_PROP_FPS, 30)  # محدود کردن نرخ فریم
             
         for _ in range(3):  # تلاش چندباره برای دریافت فریم
             ret, frame = rtsp_cap.read()
@@ -54,6 +62,93 @@ def get_rtsp_frame():
     except Exception as e:
         logger.error(f"RTSP Error: {str(e)}")
         return None
+
+async def check_and_send_plates():
+    """
+    تابعی که هر 5 ثانیه اجرا شده و تصاویر را برای پلاک بررسی می‌کند
+    و در صورت وجود پلاک جدید، به API ارسال می‌کند
+    """
+    while True:
+        try:
+            await asyncio.sleep(5)  # هر 5 ثانیه
+            
+            frame = get_rtsp_frame()
+            if frame is None:
+                continue
+                
+            frame = cv2.resize(frame, (640, 480))
+            plates = detector.detect(frame)
+            
+            current_time = datetime.now()
+            
+            for plate in plates:
+                text = recognizer.recognize(plate['image'])
+                confidence = plate['confidence']
+                
+                # اگر اعتماد به تشخیص کم است، نادیده بگیر
+                if confidence < 0.5:
+                    continue
+                    
+                # بررسی اینکه آیا این پلاک در 10 دقیقه گذشته ارسال شده
+                if text in LAST_SENT_TIME:
+                    time_diff = current_time - LAST_SENT_TIME[text]
+                    if time_diff.total_seconds() < 600:  # 10 دقیقه
+                        continue
+                
+                # ذخیره تصویر به صورت موقت
+                _, buffer = cv2.imencode('.jpg', frame)
+                image_base64 = base64.b64encode(buffer).decode('utf-8')
+                
+                # آماده کردن داده برای ارسال
+                payload = {
+                    "cameraNumber": 1,  # شماره دوربین (می‌تواند تغییر کند)
+                    "plate": text,
+                    "enterDate": current_time.strftime("%Y-%m-%d"),
+                    "enterTime": current_time.strftime("%H:%M:%S"),
+                    "exitDate": current_time.strftime("%Y-%m-%d"),
+                    "exitTime": current_time.strftime("%H:%M:%S"),
+                    "image": image_base64
+                }
+                
+                try:
+                    # ارسال به API
+                    response = requests.post(API_ENDPOINT, json=payload, timeout=10)
+                    
+                    if response.status_code == 201:
+                        logger.info(f"پلاک {text} با موفقیت ارسال شد")
+                        LAST_SENT_TIME[text] = current_time
+                        DETECTION_HISTORY.append({
+                            "plate": text,
+                            "timestamp": current_time,
+                            "sent": True
+                        })
+                    else:
+                        logger.error(f"خطا در ارسال پلاک: {response.status_code}")
+                        DETECTION_HISTORY.append({
+                            "plate": text,
+                            "timestamp": current_time,
+                            "sent": False,
+                            "error": response.text
+                        })
+                        
+                except Exception as e:
+                    logger.error(f"خطا در ارتباط با API: {str(e)}")
+                    DETECTION_HISTORY.append({
+                        "plate": text,
+                        "timestamp": current_time,
+                        "sent": False,
+                        "error": str(e)
+                    })
+                    
+        except Exception as e:
+            logger.error(f"خطا در بررسی پلاک: {str(e)}")
+            continue
+
+@app.on_event("startup")
+async def startup_event():
+    """شروع وظیفه بررسی خودکار پلاک هنگام راه‌اندازی سرور"""
+    asyncio.create_task(check_and_send_plates())
+
 @app.get("/test_rtsp_connection")
 async def test_rtsp_connection():
     try:
@@ -64,16 +159,6 @@ async def test_rtsp_connection():
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/camera_feed")
-async def camera_feed():
-    frame = get_rtsp_frame()
-    if frame is None:
-        raise HTTPException(status_code=500, detail="Failed to capture frame")
-    
-    frame = cv2.resize(frame, (640, 480))
-    _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-    return Response(content=buffer.tobytes(), media_type="image/jpeg")
 
 @app.get("/recognize_camera")
 async def recognize_camera():
@@ -116,22 +201,32 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             frame = get_rtsp_frame()
             if frame is None:
-                await asyncio.sleep(0.05)
+                
                 continue
                 
             frame = cv2.resize(frame, (640, 480))
             _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
             
             await websocket.send_bytes(buffer.tobytes())
-            await asyncio.sleep(0.05)  # ~20 FPS
-            
+           
     except Exception as e:
         logger.error(f"WebSocket error: {str(e)}")
     finally:
         await websocket.close()
 
-# سایر endpointها (recognize_image, recognize_video و...) مانند قبل باقی می‌مانند
-# ...
+@app.get("/detection_history")
+async def get_detection_history():
+    """دریافت تاریخچه تشخیص پلاک‌ها"""
+    history_list = []
+    for item in DETECTION_HISTORY:
+        history_list.append({
+            "plate": item["plate"],
+            "timestamp": item["timestamp"].isoformat(),
+            "sent": item.get("sent", False),
+            "error": item.get("error", "")
+        })
+    
+    return {"history": history_list}
 
 @app.get("/")
 async def serve_demo():
